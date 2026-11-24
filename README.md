@@ -25,11 +25,11 @@ sudo bash frp/install.sh --server
 sudo bash frp/install.sh --client  # 交互要求服务端地址、Token 文件和可信证书
 ```
 
-**GitHub 尚未发布。** 发布后将 `USERNAME` 换成实际仓库所有者。优先将单模块脚本下载到私有临时目录，检查后再以 root 执行：
+项目已托管在 [XingMeng1024/linux-scripts](https://github.com/XingMeng1024/linux-scripts)，默认分支为 `main`。优先将单模块脚本下载到私有临时目录，检查后再以 root 执行：
 
 ```bash
 module=socks5   # 可替换为 bbr、docker、frp；FRP 执行时须选择角色
-base=https://raw.githubusercontent.com/USERNAME/linux-scripts/main
+base=https://raw.githubusercontent.com/XingMeng1024/linux-scripts/main
 work=$(mktemp -d)
 curl -fSL "$base/$module/install.sh" -o "$work/install.sh"
 less "$work/install.sh"
@@ -39,7 +39,7 @@ sudo bash "$work/install.sh"
 已审阅脚本、确认来源后，也支持管道安装（非交互场景预先配置 sudo，别从脚本输入流读取密码）：
 
 ```bash
-BASE=https://raw.githubusercontent.com/USERNAME/linux-scripts/main
+BASE=https://raw.githubusercontent.com/XingMeng1024/linux-scripts/main
 curl -fsSL "$BASE/socks5/install.sh" | sudo bash
 curl -fsSL "$BASE/bbr/install.sh" | sudo bash
 curl -fsSL "$BASE/docker/install.sh" | sudo bash
@@ -47,12 +47,12 @@ curl -fsSL "$BASE/frp/install.sh" | sudo bash -s -- --server
 curl -fsSL "$BASE/frp/install.sh" | sudo bash -s -- --client
 ```
 
-FRP 客户端无终端时，按[模块说明](frp/README.md#客户端frpc)传完整参数。需要固定版本时，用已经发布的标签替换 Raw URL 的 `main`；也可下载 Release 中的单个脚本并用 `SHA256SUMS` 验证：
+FRP 客户端无终端时，按[模块说明](frp/README.md#客户端frpc)传完整参数。当前尚未发布 Release，请使用上面的 `main` 命令。发布固定版本后，可将 Raw URL 的 `main` 换成实际标签，也可以下载 Release 中的单个脚本并用 `SHA256SUMS` 验证（以下以 `v1.0.0` 为例）：
 
 ```bash
 work=$(mktemp -d)
 cd "$work"
-release=https://github.com/USERNAME/linux-scripts/releases/download/v1.0.0
+release=https://github.com/XingMeng1024/linux-scripts/releases/download/v1.0.0
 curl -fSLO "$release/socks5-install.sh" &&
   curl -fSLO "$release/SHA256SUMS" &&
   awk '$2=="socks5-install.sh"' SHA256SUMS | sha256sum -c - &&
@@ -101,20 +101,27 @@ sudo systemctl reboot
 sudo bash tests/socks5-vm.sh --disposable-vm --after-reboot
 ```
 
-## GitHub 托管与发布
+## GitHub 维护与发布
 
-在开发机、当前项目根目录操作（如果已经在 Git 仓库中，沿用现有历史，不要重新初始化）：
+尚无本地 Git 副本时，先克隆已有仓库，不要重新初始化或创建同名仓库：
 
 ```bash
-git init -b main
-git add .
-git diff --cached --stat
-git commit -m "建立 Linux Scripts 独立运维模块"
-gh auth login
-gh repo create linux-scripts --public --source=. --remote=origin --push
+git clone https://github.com/XingMeng1024/linux-scripts.git
+cd linux-scripts
 ```
 
-发布前审阅 `git diff --cached`，确认没有密码、Token、实际配置、SSH 密钥及第三方二进制。使用固定标签构建 Release 脚本与校验清单：
+将更新放入克隆目录后，检查并提交：
+
+```bash
+git status --short
+git add .
+git diff --cached --stat
+git diff --cached
+git commit -m "更新 Linux Scripts"
+git push origin main
+```
+
+提交前确认没有密码、Token、实际配置、SSH 密钥及第三方二进制。创建 Release 需要仓库发布权限；先通过 `gh auth login` 登录 GitHub CLI，再从固定标签构建脚本和校验清单：
 
 ```bash
 tag=v1.0.0

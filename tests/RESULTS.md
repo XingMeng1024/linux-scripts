@@ -15,4 +15,4 @@
 
 - Debian 12 AMD64、Debian 13、Ubuntu 22.04/24.04 未完成端到端验收；包与发行版支持信息不等同于实测。
 - 未测试公网入站、真实 Telegram 客户端、跨机 FRP/UDP 业务流量、Docker 镜像加速服务可达性、512 MiB 性能、长时间负载、异常断电或所有安全策略组合。没有实际删除 Docker 数据的测试；只验证默认保留与自定义目录删除拒绝。
-- GitHub 仓库及 Release 未发布，GitHub Actions 未在远程运行。复测及发布命令见[根目录 README](../README.md)。
+- 项目已发布到 [GitHub 仓库](https://github.com/XingMeng1024/linux-scripts)。本次核对时尚无 Release，也未看到 GitHub Actions 运行记录。复测及发布命令见[根目录 README](../README.md)。
