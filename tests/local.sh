@@ -13,6 +13,9 @@ for module in socks5 bbr docker frp; do
 done
 for file in README.md LICENSE .gitignore .gitattributes .github/workflows/test.yml \
     */README.md */install.sh */uninstall.sh tests/*.sh tests/RESULTS.md; do
+    case $file in
+        .gitignore|.gitattributes|.github/workflows/test.yml) [[ -e $file ]] || continue ;;
+    esac
     [[ -s $file ]]
     iconv -f UTF-8 -t UTF-16LE <"$file" | wc -c >/dev/null
     if grep -q $'\r' "$file"; then printf '非 LF 换行：%s\n' "$file" >&2; exit 1; fi
@@ -37,6 +40,17 @@ for host in 256.0.0.1 1.1.1.01 'https://example.com' 'x..com' '-x.example.com' '
 done
 reject '缺少参数' socks5/install.sh --port
 reject '未知选项' socks5/install.sh --password secret
+reject '不能与安装选项混用' socks5/install.sh --update --no-bbr
+reject '不能与安装选项混用' socks5/install.sh --port 21080 --update
+(
+    # shellcheck disable=SC1091
+    . ./socks5/install.sh
+    generate_credentials
+    [[ $USERNAME =~ ^u_[0-9a-f]{12}$ && $PASSWORD =~ ^[0-9a-f]{32}$ ]]
+    parse_args --username custom_user
+    generate_credentials
+    [[ $USERNAME == custom_user ]]
+)
 reject '来源必须' socks5/install.sh --allow-source 'x;id'
 reject 'CIDR 前缀' socks5/install.sh --allow-source '192.0.2.0/0'
 reject 'CIDR 前缀' socks5/install.sh --allow-source '192.0.2.0/33'

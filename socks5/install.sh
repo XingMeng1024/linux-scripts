@@ -1,5 +1,5 @@
 #!/bin/bash
-# 3proxy SOCKS5 全新安装；此文件可独立下载运行。
+# 3proxy SOCKS5 安装与程序更新；此文件可独立下载运行。
 set +x
 set -Eeuo pipefail
 umask 077
@@ -13,9 +13,10 @@ readonly SYSCTL=/etc/sysctl.d/90-3proxy-socks5-installer.conf
 readonly REPO=https://3proxy.org/repo PROXY_VERSION=0.9.9.4 DEB_VERSION=0.9.9.4-261121091843
 readonly SIGNER=FC12214499FCC7BA1CFF6CDC0312384E3A73940B
 readonly -a TEST_URLS=(https://www.debian.org/ https://www.iana.org/)
-PORT=21080 USERNAME=tgproxy PUBLIC='' BBR=1 ACCESS_LOG=0 SOURCES=''
+PORT=21080 USERNAME='' PUBLIC='' BBR=1 ACCESS_LOG=0 SOURCES=''
 tmp='' unit_stage='' dir_created=0 base_created=0 srv_created=0 user_created=0
 unit_created=0 enable_attempted=0 committed=0
+update=0 install_options=0 cancelled=0 update_stage='' update_pending=0
 red='' yellow='' green='' reset='' phase=参数检查
 if [[ -t 2 && ${TERM:-dumb} != dumb && ! ${NO_COLOR+x} ]] &&
    colors=$(tput colors 2>/dev/null) && [[ $colors =~ ^[0-9]+$ ]] && (( colors >= 8 )); then
@@ -28,12 +29,13 @@ usage() {
     cat <<'EOF'
 用法：sudo bash install.sh [选项]
   --port PORT        IPv4 监听端口，1024-65535，默认 21080
-  --username NAME    账号：1-32 个 ASCII 字母、数字、下划线或连字符
+  --username NAME    账号：1-32 个 ASCII 字母、数字、下划线或连字符，默认随机
   --public-ip HOST   客户端入站 IPv4 地址或 DNS 域名（仅用于连接信息）
   --allow-source IP[/BITS]
                      限制客户端来源 IPv4/CIDR（可重复；保留本机自检）
   --enable-log       将访问元数据写入 journal（默认关闭）
   --no-bbr           不修改 BBR 和默认队列算法
+  --update           确认更新本项目已有的 3proxy；保留原配置，不与安装选项混用
   --help             显示帮助
 EOF
 }
@@ -62,6 +64,7 @@ parse_args() {
     while (( $# )); do
         case $1 in
             --help) usage; exit 0 ;;
+            --update) update=1; shift; continue ;;
             --no-bbr) BBR=0; shift ;;
             --enable-log) ACCESS_LOG=1; shift ;;
             --port|--username|--public-ip|--allow-source)
@@ -82,11 +85,13 @@ parse_args() {
                 shift 2 ;;
             *) die '未知选项，请使用 --help。' ;;
         esac
+        install_options=1
     done
+    if (( update && install_options )); then die '--update 不能与安装选项混用。'; fi
     if [[ ! $PORT =~ ^[1-9][0-9]{3,4}$ ]] || (( PORT < 1024 || PORT > 65535 )); then
         die '端口必须为 1024-65535 的十进制整数。'
     fi
-    [[ $USERNAME =~ ^[a-zA-Z0-9_][a-zA-Z0-9_-]{0,31}$ ]] || die '用户名格式不正确。'
+    [[ -z $USERNAME || $USERNAME =~ ^[a-zA-Z0-9_][a-zA-Z0-9_-]{0,31}$ ]] || die '用户名格式不正确。'
     [[ -z $PUBLIC ]] || public_address "$PUBLIC" || die '入站地址必须是 IPv4 或合法 DNS 域名。'
 }
 
@@ -95,6 +100,18 @@ cleanup() {
     trap - EXIT ERR
     trap '' INT TERM HUP
     set +e
+    if (( update_pending && ! committed )); then
+        if [[ ! $update_stage/previous -ef $DIR/3proxy ]] &&
+           ! mv -fT -- "$update_stage/previous" "$DIR/3proxy"; then
+            warn "无法恢复旧程序；备份保留在 $update_stage/previous，请人工处理。"
+            update_stage=''
+        elif ! listener_ok; then
+            systemctl reset-failed "$SERVICE" >/dev/null 2>&1
+            if ! systemctl restart "$SERVICE" || ! wait_for_listener; then
+                warn "旧程序已恢复，但服务未恢复监听；请检查 $SERVICE 日志。"
+            fi
+        fi
+    fi
     if (( ! committed )); then
         if (( unit_created )); then
             if (( enable_attempted )) && ! systemctl disable "$SERVICE" >/dev/null 2>&1; then
@@ -132,6 +149,11 @@ cleanup() {
             if (( srv_created )); then rmdir -- /srv || warn '/srv 非空或无法删除。'; fi
         fi
     fi
+    if [[ -n $update_stage ]]; then
+        if ! rm -f -- "$update_stage"/{previous,next} || ! rmdir -- "$update_stage"; then
+            warn "未能清理更新临时目录 $update_stage。"
+        fi
+    fi
     if [[ -n $unit_stage ]]; then rm -f -- "$unit_stage" || warn '未能清理服务临时文件。'; fi
     if [[ -n $tmp ]]; then rm -rf -- "$tmp" || warn '未能清理下载临时目录。'; fi
     exit "$rc"
@@ -163,7 +185,6 @@ check_mount() {
 }
 check_conflicts() {
     local state name socket_state target proc
-    lexists "$DIR" && die "$DIR 已存在；不会覆盖。"
     for target in /etc/systemd/system /run/systemd/system /usr/lib/systemd/system /lib/systemd/system; do
         for name in "$target/$SERVICE" "$target/$SERVICE.d"; do
             lexists "$name" && die "发现同名服务或覆盖配置：$name。"
@@ -183,6 +204,71 @@ check_conflicts() {
         done < "$proc"
     done
 }
+
+check_update() {
+    local entry gid tag fragment dropins
+    local -a manifest users listeners
+    safe_parent "$DIR"
+    [[ $(stat -c '%a:%G' -- "$DIR") == "750:$ACCOUNT" ]] ||
+        die '安装目录权限或组不符合本项目预期，拒绝更新。'
+    for entry in "$DIR"/{.installer-owner,3proxy,3proxy.cfg} "$UNIT"; do
+        [[ -f $entry && ! -L $entry ]] || die "缺少项目文件或路径类型不匹配：$entry；拒绝更新。"
+    done
+    [[ $(stat -c '%u:%a' -- "$DIR/.installer-owner") == 0:600 &&
+       $(stat -c '%u:%a:%G' -- "$DIR/3proxy") == "0:750:$ACCOUNT" &&
+       $(stat -c '%u:%a:%G' -- "$DIR/3proxy.cfg") == "0:640:$ACCOUNT" &&
+       $(stat -c '%u:%a' -- "$UNIT") == 0:644 ]] || die '项目文件权限或归属异常，拒绝更新。'
+    mapfile -t manifest < "$DIR/.installer-owner"
+    (( ${#manifest[@]} == 2 )) && [[ ${manifest[0]} == "$OWNER" &&
+        ${manifest[1]} =~ ^([1-9][0-9]*)\ ([1-9][0-9]*)\ [01]\ [01]$ ]] ||
+        die '没有有效的本项目归属记录；不会覆盖。'
+    entry=${BASH_REMATCH[1]} gid=${BASH_REMATCH[2]}
+    grep -q "^$ACCOUNT:" /etc/passwd && grep -q "^$ACCOUNT:" /etc/group &&
+        [[ $(id -u "$ACCOUNT") == "$entry" && $(id -g "$ACCOUNT") == "$gid" ]] ||
+        die '原安装的专用账号不匹配，拒绝更新。'
+    IFS= read -r tag < "$UNIT"
+    fragment=$(systemctl show -p FragmentPath --value "$SERVICE")
+    dropins=$(systemctl show -p DropInPaths --value "$SERVICE")
+    [[ $tag == "# $OWNER" && $fragment == "$UNIT" && -z $dropins ]] ||
+        die '服务归属不匹配或存在 systemd 覆盖，拒绝更新。'
+
+    mapfile -t users < <(grep -E '^[[:space:]]*users([[:space:]]|$)' "$DIR/3proxy.cfg")
+    mapfile -t listeners < <(grep -E '^[[:space:]]*socks([[:space:]]|$)' "$DIR/3proxy.cfg")
+    (( ${#users[@]} == 1 && ${#listeners[@]} == 1 )) &&
+        [[ ${users[0]} =~ ^users\ ([a-zA-Z0-9_][a-zA-Z0-9_-]{0,31}):CL:([0-9a-f]{32})$ ]] ||
+        die '无法识别原代理账号配置，拒绝更新。'
+    USERNAME=${BASH_REMATCH[1]} PASSWORD=${BASH_REMATCH[2]}
+    [[ ${listeners[0]} =~ ^socks\ -4\ -u2\ -i0\.0\.0\.0\ -p([1-9][0-9]{3,4})\ -l(/dev/null)?$ ]] ||
+        die '无法识别原代理监听配置，拒绝更新。'
+    PORT=${BASH_REMATCH[1]}
+    (( PORT >= 1024 && PORT <= 65535 )) || die '原代理端口无效，拒绝更新。'
+    if ! command -v ss >/dev/null || ! systemctl is-active --quiet "$SERVICE" || ! listener_ok; then
+        die '原代理未正常监听；请修复服务后重试更新。'
+    fi
+}
+
+select_operation() {
+    local reply
+    if ! lexists "$DIR"; then
+        (( ! update )) || die '没有可更新的 SOCKS5 安装。'
+        check_conflicts
+        return
+    fi
+    if (( ! update )) && { (( install_options )) || [[ ! -t 0 ]]; }; then
+        die "$DIR 已存在；不会覆盖。若为本项目安装，请单独使用 --update。"
+    fi
+    check_update
+    if (( ! update )); then
+        printf '检测到本项目的 SOCKS5。更新只替换程序，会短暂中断连接；输入 yes 确认：' >&2
+        if ! read -r reply || [[ $reply != yes ]]; then
+            printf '已取消，未修改现有安装。\n'
+            cancelled=1
+            return
+        fi
+        update=1
+    fi
+}
+
 preflight() {
     local tool nearest route iface dest flags now
     [[ $(uname -s) == Linux && -r /etc/os-release ]] || die '只支持 Debian/Ubuntu Linux。'
@@ -195,7 +281,7 @@ preflight() {
     esac
     for tool in apt-get dpkg dpkg-deb dpkg-query awk grep stat mkdir rmdir rm install mktemp \
         findmnt df flock sha256sum od timeout date getent runuser useradd userdel groupdel \
-        systemctl systemd-analyze ldd env ln cat chmod chown id sleep; do
+        systemctl systemd-analyze ldd env ln mv cat chmod chown id sleep; do
         command -v "$tool" >/dev/null || die "缺少基础系统命令 $tool，请先修复系统。"
     done
     ARCH=$(dpkg --print-architecture)
@@ -210,13 +296,15 @@ preflight() {
     flock -n 9 || die '另一个安装或卸载进程正在运行。'
     now=$(date +%s)
     (( now >= 1795219200 && now < 4102444800 )) || die '系统时间明显异常；请先检查时钟和 NTP。'
-    check_conflicts
     nearest=/
     for route in /srv "$BASE"; do
         if lexists "$route"; then safe_parent "$route"; nearest=$route; fi
     done
-    check_mount "$nearest" exec
     safe_parent /etc/systemd/system
+    select_operation
+    if (( cancelled )); then return; fi
+    if (( update )); then nearest=$DIR; fi
+    check_mount "$nearest" exec
     check_mount /etc/systemd/system data
     check_mount /var/tmp data
     check_mount /var/cache/apt data
@@ -369,14 +457,24 @@ prepare_service() {
     runuser -u "$ACCOUNT" -- test -x "$DIR/3proxy" || die '运行用户不能遍历目录或执行 ELF。'
     direct_probe
 }
-write_config() {
-    local source_acl='*' log_flag=-l/dev/null log_output=null
-    if [[ -n $SOURCES ]]; then source_acl="127.0.0.1,$SOURCES"; fi
-    if (( ACCESS_LOG )); then log_flag=-l; log_output=journal; fi
+generate_credentials() {
+    local random
+    if [[ -z $USERNAME ]]; then
+        random=$(od -An -v -tx1 -N6 /dev/urandom)
+        random=${random//[[:space:]]/}
+        [[ $random =~ ^[0-9a-f]{12}$ ]] || die '系统随机源未返回完整用户名。'
+        USERNAME=u_$random
+    fi
     # 16 字节均匀系统随机数，编码为 32 个十六进制字符（128 位熵）。
     PASSWORD=$(od -An -v -tx1 -N16 /dev/urandom)
     PASSWORD=${PASSWORD//[[:space:]]/}
     [[ $PASSWORD =~ ^[0-9a-f]{32}$ ]] || die '系统随机源未返回完整密码。'
+}
+write_config() {
+    local source_acl='*' log_flag=-l/dev/null log_output=null
+    if [[ -n $SOURCES ]]; then source_acl="127.0.0.1,$SOURCES"; fi
+    if (( ACCESS_LOG )); then log_flag=-l; log_output=journal; fi
+    generate_credentials
     cat > "$DIR/3proxy.cfg" <<EOF
 # 并发上限，必须位于 socks 指令之前。
 maxconn 256
@@ -453,19 +551,22 @@ listener_ok() {
        $sockets =~ [[:space:]]0\.0\.0\.0:${PORT}[[:space:]] ]]
 }
 start_service() {
-    local n
     systemctl daemon-reload || die 'systemd 无法重新加载单元。'
     [[ $(systemctl show -p FragmentPath --value "$SERVICE") == "$UNIT" &&
        -z $(systemctl show -p DropInPaths --value "$SERVICE") ]] ||
         die '发现其他 systemd 单元或覆盖规则，取消启动。'
     systemctl start "$SERVICE" || die '无法启动服务；请检查 journalctl -u socks5.service（CHDIR、EXEC、配置或端口错误）。'
+    wait_for_listener ||
+        die '未检测到稳定的 3proxy IPv4 监听，请检查服务日志。'
+}
+wait_for_listener() {
+    local n
     for (( n=0; n<40; n++ )); do
         if systemctl is-active --quiet "$SERVICE" && listener_ok; then return; fi
-        [[ $(systemctl show -p NRestarts --value "$SERVICE") == 0 ]] ||
-            die '进程启动后退出并发生重启，请检查服务日志。'
+        [[ $(systemctl show -p NRestarts --value "$SERVICE") == 0 ]] || return 1
         sleep 0.25
     done
-    die '未在规定时间内检测到属于 3proxy 主进程的 IPv4 监听，请检查服务日志。'
+    return 1
 }
 
 socks_reply() {
@@ -615,14 +716,33 @@ socks5://$USERNAME:$PASSWORD@$host:$PORT
 EOF
 }
 
+replace_binary() {
+    step 5 '正在备份并替换现有程序'
+    check_update
+    update_stage=$(mktemp -d "$DIR/.update.XXXXXXXX")
+    ln -- "$DIR/3proxy" "$update_stage/previous"
+    install -o root -g "$ACCOUNT" -m 0750 -- "$binary" "$update_stage/next"
+    update_pending=1
+    mv -fT -- "$update_stage/next" "$DIR/3proxy"
+    step 7 '正在重启并验证现有服务'
+    if ! systemctl restart "$SERVICE" || ! wait_for_listener; then
+        die '更新后服务未正常监听；正在回滚。'
+    fi
+    step 8 '正在检查认证和转发'
+    proxy_tests
+    committed=1
+    printf 'SOCKS5 已更新为脚本指定的 3proxy %s，原配置及连接信息未修改。\n' "$PROXY_VERSION"
+}
+
 main() {
     local cc_status='未知' q_status='未知'
     parse_args "$@"
     trap cleanup EXIT
-    trap 'die "收到中断信号；正在回滚本次安装。"' INT TERM HUP
+    trap 'die "收到中断信号；正在清理或回滚本次操作。"' INT TERM HUP
     trap 'die "步骤「$phase」失败（行 $LINENO，退出码 $?）。"' ERR
     step 1 '正在检测服务器环境'
     preflight
+    if (( cancelled )); then return 0; fi
     step 2 '正在检查系统依赖'
     tmp=$(mktemp -d /var/tmp/3proxy-socks5.XXXXXXXX)
     chmod 0711 "$tmp"
@@ -641,7 +761,12 @@ main() {
     fetch_package
     step 4 '正在检查 ELF 和动态链接库'
     verify_binary
+    if (( update )); then
+        replace_binary
+        return
+    fi
     step 5 '正在创建并验证专用运行用户'
+    lexists "$DIR" && die "$DIR 已存在；不会覆盖。"
     check_conflicts
     prepare_service
     step 6 '正在生成代理配置和 systemd 单元'

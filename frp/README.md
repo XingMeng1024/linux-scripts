@@ -9,7 +9,7 @@
 ```bash
 (f=$(mktemp) && trap 'rm -f "$f"' EXIT &&
   curl -fsSL https://raw.githubusercontent.com/XingMeng1024/linux-scripts/main/frp/install.sh -o "$f" &&
-  sudo bash "$f" --server)
+  if [ "$(id -u)" -eq 0 ]; then bash "$f" --server; else sudo bash "$f" --server; fi)
 ```
 
 控制端口默认 `7000`，映射端口默认 `17000`，映射只监听服务端的 `127.0.0.1`。确需对外开放时才加 `--public-bind`，并自行配置防火墙。
@@ -19,7 +19,7 @@
 ```bash
 (f=$(mktemp) && trap 'rm -f "$f"' EXIT &&
   curl -fsSL https://raw.githubusercontent.com/XingMeng1024/linux-scripts/main/frp/install.sh -o "$f" &&
-  sudo bash "$f" --client)
+  if [ "$(id -u)" -eq 0 ]; then bash "$f" --client; else sudo bash "$f" --client; fi)
 ```
 
 先从服务端 `/srv/net-services/frp/frps/` 安全取得 `server.crt` 和 `token.txt`，**不要复制 `server.key`**。客户端 Token 文件须归 root 所有，建议权限 `0600`。默认 TLS 名称为 `frps.local`；证书有效期一年，到期前需轮换。
@@ -50,7 +50,7 @@ sudo systemctl status frps.service  # 客户端改为 frpc.service
 ```bash
 (f=$(mktemp) && trap 'rm -f "$f"' EXIT &&
   curl -fsSL https://raw.githubusercontent.com/XingMeng1024/linux-scripts/main/frp/uninstall.sh -o "$f" &&
-  sudo bash "$f" --server)
+  if [ "$(id -u)" -eq 0 ]; then bash "$f" --server; else sudo bash "$f" --server; fi)
 ```
 
 客户端：
@@ -58,5 +58,5 @@ sudo systemctl status frps.service  # 客户端改为 frpc.service
 ```bash
 (f=$(mktemp) && trap 'rm -f "$f"' EXIT &&
   curl -fsSL https://raw.githubusercontent.com/XingMeng1024/linux-scripts/main/frp/uninstall.sh -o "$f" &&
-  sudo bash "$f" --client)
+  if [ "$(id -u)" -eq 0 ]; then bash "$f" --client; else sudo bash "$f" --client; fi)
 ```

@@ -148,7 +148,7 @@ if runuser -u "$account" -- test -r "$dir/connection.txt"; then exit 1; fi
     . ./install.sh
     USERNAME=$(awk '/^users /{split($2,a,":"); print a[1]}' "$DIR/3proxy.cfg")
     PASSWORD=$(awk '/^users /{split($2,a,":"); print a[3]}' "$DIR/3proxy.cfg")
-    [[ -n $USERNAME && ${#PASSWORD} == 32 ]]
+    [[ $USERNAME =~ ^u_[0-9a-f]{12}$ && $PASSWORD =~ ^[0-9a-f]{32}$ ]]
     addr=$(ip -4 route get 1.1.1.1 | awk '{for(i=1;i<NF;i++) if($i=="src"){print $(i+1); break}}')
     [[ -n $addr && $addr != 127.* ]]
     socks_probe good '\x01' '\x01\x01\x01\x01\x01' '\x01\xbb' 0502 "$addr"
@@ -158,7 +158,28 @@ if runuser -u "$account" -- test -r "$dir/connection.txt"; then exit 1; fi
     [[ $log_lines != *"$PASSWORD"* ]]
     grep -Eq '^[0-9]{9,} [0-9]+ 127\.0\.0\.1:' <<< "$log_lines"
 )
-fingerprint=$(sha256sum "$dir/3proxy.cfg")
-expect_failure '已存在；不会覆盖' bash ./install.sh
-[[ $(sha256sum "$dir/3proxy.cfg") == "$fingerprint" ]]
-printf '初次安装、拒绝策略、权限、冲突及回滚测试通过。请重启 VM，再执行 --disposable-vm --after-reboot。\n'
+fingerprint=$(sha256sum "$dir/3proxy.cfg" "$dir/connection.txt" "$unit")
+expect_failure '已存在；不会覆盖' bash ./install.sh </dev/null
+[[ $(sha256sum "$dir/3proxy.cfg" "$dir/connection.txt" "$unit") == "$fingerprint" ]]
+
+chmod 0644 "$dir/.installer-owner"
+expect_failure '项目文件权限或归属异常' bash ./install.sh --update
+chmod 0600 "$dir/.installer-owner"
+baseline=$(stat -c '%i' "$dir/3proxy")
+# shellcheck disable=SC2016
+expect_failure '测试专用更新回滚触发点' bash -c '
+    source ./install.sh
+    proxy_tests() { die "测试专用更新回滚触发点"; }
+    main --update
+'
+[[ $(stat -c '%i' "$dir/3proxy") == "$baseline" ]]
+systemctl is-active --quiet socks5.service
+if ! bash ./install.sh --update >"$log" 2>&1; then
+    grep -E '^\[[0-9]+/10\]|^错误：|^警告：' "$log" >&2 || :
+    exit 1
+fi
+[[ $(stat -c '%i' "$dir/3proxy") != "$baseline" ]]
+[[ $(sha256sum "$dir/3proxy.cfg" "$dir/connection.txt" "$unit") == "$fingerprint" ]]
+systemctl is-active --quiet socks5.service
+systemctl is-enabled --quiet socks5.service
+printf '初次安装、拒绝策略、权限、更新及回滚测试通过。请重启 VM，再执行 --disposable-vm --after-reboot。\n'

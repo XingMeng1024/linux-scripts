@@ -9,7 +9,7 @@
 ```bash
 (f=$(mktemp) && trap 'rm -f "$f"' EXIT &&
   curl -fsSL https://raw.githubusercontent.com/XingMeng1024/linux-scripts/main/bbr/install.sh -o "$f" &&
-  sudo bash "$f")
+  if [ "$(id -u)" -eq 0 ]; then bash "$f"; else sudo bash "$f"; fi)
 ```
 
 ## 查看状态
@@ -26,7 +26,7 @@ tc qdisc show
 ```bash
 (f=$(mktemp) && trap 'rm -f "$f"' EXIT &&
   curl -fsSL https://raw.githubusercontent.com/XingMeng1024/linux-scripts/main/bbr/uninstall.sh -o "$f" &&
-  sudo bash "$f")
+  if [ "$(id -u)" -eq 0 ]; then bash "$f"; else sudo bash "$f"; fi)
 ```
 
 按提示确认；无终端时可加 `--yes`。配置位于 `/etc/sysctl.d/99-linux-scripts-bbr.conf`，卸载仅在没有冲突时恢复原值。

@@ -4,14 +4,14 @@
 
 ## 一键安装
 
-不用 `git clone`。在 Linux 服务器上按需复制一条命令，直接从 GitHub 下载并运行。命令需要 `curl`；已是 root 且没有 `sudo` 时，去掉 `sudo`。
+不用 `git clone`。在 Linux 服务器上按需复制一条命令。命令需要 `curl`；已是 root 就直接运行，普通用户使用 `sudo`。
 
 [SOCKS5](socks5/README.md)：安装带密码认证的 3proxy。
 
 ```bash
 (f=$(mktemp) && trap 'rm -f "$f"' EXIT &&
   curl -fsSL https://raw.githubusercontent.com/XingMeng1024/linux-scripts/main/socks5/install.sh -o "$f" &&
-  sudo bash "$f")
+  if [ "$(id -u)" -eq 0 ]; then bash "$f"; else sudo bash "$f"; fi)
 ```
 
 [BBR](bbr/README.md)：启用内核 BBR 和默认 FQ。
@@ -19,7 +19,7 @@
 ```bash
 (f=$(mktemp) && trap 'rm -f "$f"' EXIT &&
   curl -fsSL https://raw.githubusercontent.com/XingMeng1024/linux-scripts/main/bbr/install.sh -o "$f" &&
-  sudo bash "$f")
+  if [ "$(id -u)" -eq 0 ]; then bash "$f"; else sudo bash "$f"; fi)
 ```
 
 [Docker](docker/README.md)：安装官方 Docker Engine、Buildx 和 Compose。
@@ -27,7 +27,7 @@
 ```bash
 (f=$(mktemp) && trap 'rm -f "$f"' EXIT &&
   curl -fsSL https://raw.githubusercontent.com/XingMeng1024/linux-scripts/main/docker/install.sh -o "$f" &&
-  sudo bash "$f")
+  if [ "$(id -u)" -eq 0 ]; then bash "$f"; else sudo bash "$f"; fi)
 ```
 
 [FRP 服务端](frp/README.md#一键安装)：
@@ -35,7 +35,7 @@
 ```bash
 (f=$(mktemp) && trap 'rm -f "$f"' EXIT &&
   curl -fsSL https://raw.githubusercontent.com/XingMeng1024/linux-scripts/main/frp/install.sh -o "$f" &&
-  sudo bash "$f" --server)
+  if [ "$(id -u)" -eq 0 ]; then bash "$f" --server; else sudo bash "$f" --server; fi)
 ```
 
 [FRP 客户端](frp/README.md#一键安装)（需终端、服务端地址、Token 文件及证书）：
@@ -43,21 +43,23 @@
 ```bash
 (f=$(mktemp) && trap 'rm -f "$f"' EXIT &&
   curl -fsSL https://raw.githubusercontent.com/XingMeng1024/linux-scripts/main/frp/install.sh -o "$f" &&
-  sudo bash "$f" --client)
+  if [ "$(id -u)" -eq 0 ]; then bash "$f" --client; else sudo bash "$f" --client; fi)
 ```
 
 命令会先完整下载再执行。`main` 会更新，建议先检查脚本内容；需要固定版本时，可将 URL 中的 `main` 换成已审阅的提交 SHA。
 
+[更新已有 SOCKS5 安装](socks5/README.md#一键更新)：保留账号、密码和配置，只替换程序。
+
 ## 一键卸载
 
-无需克隆仓库。在安装过对应模块的服务器上择一运行，按提示输入 `yes` 确认。无终端时，确认无误后可在 `sudo bash "$f"` 的参数末尾加 `--yes`。
+无需克隆仓库。在安装过对应模块的服务器上择一运行，按提示输入 `yes` 确认。无终端时，确认无误后可在两个 `bash "$f"` 分支的参数末尾加 `--yes`。
 
 **SOCKS5**
 
 ```bash
 (f=$(mktemp) && trap 'rm -f "$f"' EXIT &&
   curl -fsSL https://raw.githubusercontent.com/XingMeng1024/linux-scripts/main/socks5/uninstall.sh -o "$f" &&
-  sudo bash "$f")
+  if [ "$(id -u)" -eq 0 ]; then bash "$f"; else sudo bash "$f"; fi)
 ```
 
 **BBR**
@@ -65,7 +67,7 @@
 ```bash
 (f=$(mktemp) && trap 'rm -f "$f"' EXIT &&
   curl -fsSL https://raw.githubusercontent.com/XingMeng1024/linux-scripts/main/bbr/uninstall.sh -o "$f" &&
-  sudo bash "$f")
+  if [ "$(id -u)" -eq 0 ]; then bash "$f"; else sudo bash "$f"; fi)
 ```
 
 **Docker**（默认保留数据，有运行中的容器时拒绝卸载）
@@ -73,7 +75,7 @@
 ```bash
 (f=$(mktemp) && trap 'rm -f "$f"' EXIT &&
   curl -fsSL https://raw.githubusercontent.com/XingMeng1024/linux-scripts/main/docker/uninstall.sh -o "$f" &&
-  sudo bash "$f")
+  if [ "$(id -u)" -eq 0 ]; then bash "$f"; else sudo bash "$f"; fi)
 ```
 
 **FRP 服务端**
@@ -81,7 +83,7 @@
 ```bash
 (f=$(mktemp) && trap 'rm -f "$f"' EXIT &&
   curl -fsSL https://raw.githubusercontent.com/XingMeng1024/linux-scripts/main/frp/uninstall.sh -o "$f" &&
-  sudo bash "$f" --server)
+  if [ "$(id -u)" -eq 0 ]; then bash "$f" --server; else sudo bash "$f" --server; fi)
 ```
 
 **FRP 客户端**
@@ -89,7 +91,7 @@
 ```bash
 (f=$(mktemp) && trap 'rm -f "$f"' EXIT &&
   curl -fsSL https://raw.githubusercontent.com/XingMeng1024/linux-scripts/main/frp/uninstall.sh -o "$f" &&
-  sudo bash "$f" --client)
+  if [ "$(id -u)" -eq 0 ]; then bash "$f" --client; else sudo bash "$f" --client; fi)
 ```
 
 ## 本地运行
