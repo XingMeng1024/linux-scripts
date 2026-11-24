@@ -33,12 +33,30 @@ sudo bash frp/install.sh --client \
   --local-port 8080 --remote-port 17000
 ```
 
-## 查看与卸载
+## 查看状态
 
 ```bash
 sudo systemctl status frps.service  # 客户端改为 frpc.service
-sudo bash frp/uninstall.sh --client
-sudo bash frp/uninstall.sh --server
 ```
 
-卸载命令在仓库根目录按角色择一运行，无终端时可加 `--yes`。仅映射你有权管理的服务；FRP 的 TLS 不替代业务 HTTPS。
+仅映射你有权管理的服务；FRP 的 TLS 不替代业务 HTTPS。
+
+## 一键卸载
+
+在对应服务器上按角色择一运行，按提示确认；无终端时可加 `--yes`。
+
+服务端：
+
+```bash
+(f=$(mktemp) && trap 'rm -f "$f"' EXIT &&
+  curl -fsSL https://raw.githubusercontent.com/XingMeng1024/linux-scripts/main/frp/uninstall.sh -o "$f" &&
+  sudo bash "$f" --server)
+```
+
+客户端：
+
+```bash
+(f=$(mktemp) && trap 'rm -f "$f"' EXIT &&
+  curl -fsSL https://raw.githubusercontent.com/XingMeng1024/linux-scripts/main/frp/uninstall.sh -o "$f" &&
+  sudo bash "$f" --client)
+```

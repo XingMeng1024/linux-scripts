@@ -14,15 +14,22 @@
 
 已有 Docker 或历史数据时不接管。默认不写 `daemon.json`、不添加用户到 `docker` 组。自定义数据目录、日志轮转、镜像源和地址池参数见 `bash docker/install.sh --help`。
 
-## 查看与卸载
+## 查看状态
 
 ```bash
 sudo docker compose version
 sudo docker ps -a
 sudo journalctl -u docker.service -n 50 --no-pager
-sudo bash docker/uninstall.sh
 ```
 
-卸载命令在仓库根目录运行。默认保留数据，有运行中的容器时会拒绝卸载。`--purge-data` 会不可逆地删除符合条件的默认数据，且必须在终端确认；不会自动删除自定义数据目录。
-
 发布容器端口前，先阅读 [Docker 防火墙说明](https://docs.docker.com/engine/network/packet-filtering-firewalls/)。
+
+## 一键卸载
+
+```bash
+(f=$(mktemp) && trap 'rm -f "$f"' EXIT &&
+  curl -fsSL https://raw.githubusercontent.com/XingMeng1024/linux-scripts/main/docker/uninstall.sh -o "$f" &&
+  sudo bash "$f")
+```
+
+按提示确认；无终端时可加 `--yes`。默认保留数据，有运行中的容器时会拒绝卸载。`--purge-data` 会不可逆地删除符合条件的默认数据，且必须在终端确认；不会自动删除自定义数据目录。
